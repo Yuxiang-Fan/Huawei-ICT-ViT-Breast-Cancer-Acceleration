@@ -1,0 +1,101 @@
+# ==============================================================================
+# 昇腾 NPU ViT 推理加速方案 - 全局实验配置文件
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. 基础项目配置 (Project Settings)
+# ------------------------------------------------------------------------------
+project:
+  name: "Huawei_ICT_ViT_Acceleration"
+  seed: 42                           # 全局随机种子，确保实验可复现
+  device: "cuda"                     # 训练设备: 'cuda', 'npu' 或 'cpu'
+  use_amp: true                      # 是否开启自动混合精度 (FP16/BF16) 以加速训练
+
+# ------------------------------------------------------------------------------
+# 2. 数据工程配置 (Data Pipeline)
+# ------------------------------------------------------------------------------
+data:
+  raw_wsi_dir: "path/to/your/raw/WSI"                       # [外部占位符] 原始 .svs 文件目录
+  annotation_dir: "path/to/your/dataset/annotations"        # [外部占位符] XML 标注文件目录
+  processed_root: "path/to/your/processed/wsi_patches"      # [外部占位符] 多折切片输出根目录
+  
+  num_folds: 4                       # 交叉验证的 Fold 数量
+  target_class_count: 6              # WSI 级别数据均衡化时的每类目标数量
+  image_size: 224                    # ViT 期望的输入分辨率
+  batch_size: 64                     # 训练批次大小 (如果显存溢出可调小至 32)
+  num_workers: 8                     # DataLoader 的多进程加载数量
+  pin_memory: true                   # 是否锁页内存，加速向 GPU/NPU 的数据拷贝
+
+# ------------------------------------------------------------------------------
+# 3. 模型架构配置 (Model Architecture)
+# ------------------------------------------------------------------------------
+model:
+  backbone:
+    weight_path: "path/to/your/weights/uni_pytorch_model.bin" # [外部占位符] UNI 预训练权重
+    embed_dim: 1024                  # UNI (ViT-Large) 的输出特征维度
+    freeze_blocks: 18                # 冻结前 18 个 Transformer Block，仅微调后 6 层
+  
+  enhancer:
+    hidden_dim: 512                  # 门控降维后的特征维度 (适配 NPU 显存)
+    dropout_rate: 0.25
+    num_priors: 4                    # 注意力精粹模块的可学习先验数量
+  
+  aggregator:
+    agg_type: "gated"                # MIL 聚合策略: 'abmil', 'gated', 或 'multihead'
+    num_heads: 4                     # 仅在 agg_type 为 'multihead' 时生效
+    num_classes: 4                   # 乳腺癌四分类任务
+
+# ------------------------------------------------------------------------------
+# 4. 训练与早停引擎 (Training Engine)
+# ------------------------------------------------------------------------------
+train:
+  epochs: 50                         # 最大训练轮数
+  learning_rate: 0.0001              # 初始学习率 (1e-4)
+  weight_decay: 0.00001              # 权重衰减 (L2 正则化)
+  
+  early_stopping:
+    patience: 10                     # 容忍多少个 epoch 验证集无提升
+    mode: "max"                      # 监控模式: 'max' (对于 F1/Acc) 或 'min' (对于 Loss)
+    min_delta: 0.0001
+  
+  save_dir: "./checkpoints/baseline" # 模型权重保存目录
+
+# ------------------------------------------------------------------------------
+# 5. 模型压缩与蒸馏配置 (Compression & Distillation)
+# ------------------------------------------------------------------------------
+compression:
+  pruning:
+    use_structured: true             # 是否开启结构化剪枝 (Block 截断)
+    struct_keep_ratio: 0.75          # 保留的 Block 比例 (例如 24 * 0.75 = 18 层)
+    
+    use_unstructured: false          # 是否开启非结构化幅度剪枝
+    unstruct_ratio: 0.3              # 稀疏度 (置零 30% 权重)
+    unstruct_global: true            # 是否使用全局 L1 剪枝
+  
+  distillation:
+    enable: false                    # 是否开启蒸馏 (在 trainer 中需加载 teacher_model)
+    temperature_T: 4.0               # 软标签温度系数
+    # DKD (Decoupled Knowledge Distillation) 专有参数
+    dkd_alpha: 1.0                   # TCKD (目标类知识) 权重
+    dkd_beta: 8.0                    # NCKD (非目标类知识) 权重 (推荐较高以学习类间相似度)
+  
+  low_rank:
+    enable: false                    # 是否在导出前进行 SVD 奇异值分解
+    energy_threshold: 0.95           # 奇异值能量保留阈值 (决定压缩率与精度损失的 trade-off)
+    min_compression_ratio: 0.85      # 如果压缩后参数量占比大于 85%，则不对该层进行分解
+
+# ------------------------------------------------------------------------------
+# 6. 昇腾部署与量化配置 (NPU Deployment & Quantization)
+# ------------------------------------------------------------------------------
+npu_deployment:
+  work_dir: "./npu_deployment"       # ONNX 和 OM 文件的输出目录
+  soc_version: "Ascend310P3"         # 目标昇腾芯片版本 (如 Ascend910B, Ascend310P3)
+  
+  export_onnx:
+    dynamic_batch: false             # NPU 推荐静态形状以获得最高算子性能
+    opset_version: 14                # ONNX 算子集版本
+  
+  quantization:
+    enable_amct_ptq: true            # 是否使用 AMCT 进行 INT8 训练后量化
+    calib_batch_size: 1              # 校准数据集的 Batch Size (推理通常为 1)
+    calib_iters: 16                  # 用于收集 Min/Max 统计信息的校准批次数
