@@ -1,0 +1,33 @@
+# --- 核心深度学习框架 (Core Deep Learning) ---
+# 注意：在昇腾 NPU 环境下，torch 和 torchvision 通常由镜像预装或需安装配套的 torch_npu
+torch
+torchvision
+timm==0.9.2
+
+# --- 医疗影像与几何处理 (Medical Imaging & Geometry) ---
+openslide-python
+shapely
+Pillow
+numpy
+
+# --- 实验评估与数据分析 (Metrics & Analysis) ---
+scikit-learn
+pandas
+matplotlib
+
+# --- 工程化与配置管理 (Utilities & Config) ---
+tqdm
+PyYAML
+psutil
+
+# --- 华为云 OBS 与网络工具 (Cloud & Networking) ---
+# 华为云官方 OBS SDK
+esdk-obs-python
+# 针对 OBS 的 S3 协议兼容工具
+boto3
+# 自动重试机制
+tenacity
+
+# --- 导出与部署 (Deployment) ---
+onnx
+onnxruntime
